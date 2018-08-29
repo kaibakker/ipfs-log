@@ -1,13 +1,11 @@
 'use strict'
 
 const Log = require('../src/log')
-const Keystore = require('orbit-db-keystore')
 const EntryIO = require('../src/entry-io')
 const IPFS = require('ipfs')
 const IPFSRepo = require('ipfs-repo')
 const DatastoreLevel = require('datastore-level')
-
-const { ACL, Identity, IdentityProvider } = Log
+const { AccessController, IdentityProvider, Keystore } = Log
 
 // State
 let ipfs
@@ -45,23 +43,13 @@ let run = (() => {
 
   ipfs.on('ready', async () => {
     // Create a log
-    const keystore = Keystore.create('./test-keys')
-    const key = keystore.createKey('benchmark-from-entry-hash')
-    const provider = new IdentityProvider(
-      data => keystore.sign(key, data),
-      async (sig, entryKey, data) =>  {
-        const pubKey = await keystore.importPublicKey(entryKey)
-        return keystore.verify(sig, pubKey, data)
-      }
-    )
-    const acl = new ACL((pubKey, entry) => Promise.resolve(pubKey === key.getPublic('hex')))
-    const identity = new Identity(
-      key.getPublic('hex'),
-      key.getPublic('hex'),
-      provider
-    )
+    const testKeysPath = './test/fixtures/keys'
+    const keystore = Keystore.create(testKeysPath)
+    const identitySignerFn = (key, data) => keystore.sign(key, data)
+    const access = new AccessController()
+    const identity = await IdentityProvider.createIdentity(keystore, 'userA', identitySignerFn)
 
-    log = new Log(ipfs, 'A', null, null, null, acl, identity)
+    log = new Log(ipfs, access, identity, 'A')
 
     const count = parseInt(process.argv[2]) || 50000
     const refCount = 64
@@ -121,7 +109,7 @@ let run = (() => {
       log._id,
       -1,
       [],
-      log._acl,
+      log._access,
       log._identity,
       onDataUpdated
     )

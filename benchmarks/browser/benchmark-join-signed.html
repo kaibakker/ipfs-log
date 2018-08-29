@@ -8,44 +8,31 @@
     <h2>Description</h2>
     <div>Add an entry to two logs and join them after each update. Measure throughput in operations per second.</div>
     <pre><i>
-    const keystore = Keystore.create('./browser-benchmark-join-test-keys')
-    const key = keystore.createKey('browser-benchmark-join-signed')
-    const provider = new IdentityProvider(
-      data => keystore.sign(key, data),
-      async (sig, entryKey, data) =>  {
-        const pubKey = await keystore.importPublicKey(entryKey)
-        return keystore.verify(sig, pubKey, data)
-      }
-    )
-    const acl = new ACL((pubKey, entry) => Promise.resolve(pubKey === key.getPublic('hex')))
-    const identity = new Identity(
-      key.getPublic('hex'),
-      key.getPublic('hex'),
-      provider
-    )
+    const testKeyPath = '../test/fixtures/keys'
+    const keystore = Keystore.create(testKeyPath)
+    const identitySignerFn = (key, data) => keystore.sign(key, data)
+    const access = new AccessController()
+    const identity1 = await IdentityProvider.createIdentity(keystore, 'userA', identitySignerFn)
+    const identit2y = await IdentityProvider.createIdentity(keystore, 'userB', identitySignerFn)
 
-    log1 = new Log(ipfs, 'browser-benchmark-join-signed-A', null, null, null, acl, identity)
-    log2 = new Log(ipfs, 'browser-benchmark-join-signed-B', null, null, null, acl, identity)
+    log1 = new Log(ipfs, access, identity1, 'browser-benchmark-join-signed-A')
+    log2 = new Log(ipfs, access, identity2, 'browser-benchmark-join-signed-B')
 
     const add1 = await log1.append("a" + loopCount)
     const add2 = await log2.append("b" + loopCount)
 
-    Promise.all([add1, add2])
-      .then((res) => {
-        log1.join(log2)
-        log2.join(log1)
-      })
+    const result = await Promise.all([add1, add2])
+    await log1.join(log2)
+    awiat log2.join(log1)
     </i></pre>
 
     <h2>Results</h2>
     <pre id="output"></pre>
 
-    <script type="text/javascript" src="keystore.min.js" charset="utf-8"></script>
     <script type="text/javascript" src="../../dist/ipfslog.min.js" charset="utf-8"></script>
     <script type="text/javascript" src="../../node_modules/ipfs/dist/index.min.js" charset="utf-8"></script>
 
     <script type="text/javascript">
-      // @FIXME Fix browser benchmarks before merging!
       let ipfs
 
       // Metrics
@@ -55,6 +42,7 @@
       let lastTenSeconds = 0
       let log1, log2
 
+      const { AccessController, IdentityProvider, Keystore } = Log
       const queryLoop = () => {
         const add1 = log1.append("a" + totalQueries)
         const add2 = log2.append("b" + totalQueries)
@@ -84,7 +72,7 @@
 
         ipfs.on('error', (err) => console.error(err))
 
-        ipfs.on('ready', () => {
+        ipfs.on('ready', async () => {
           const outputElm = document.getElementById('output')
           // Output metrics at 1 second interval
           setInterval(() => {
@@ -100,24 +88,14 @@
             queriesPerSecond = 0
           }, 1000)
 
-          const keystore = Keystore.create('./browser-benchmark-join-test-keys')
-          const key = keystore.createKey('browser-benchmark-join-signed')
-          const provider = new IdentityProvider(
-            data => keystore.sign(key, data),
-            async (sig, entryKey, data) =>  {
-              const pubKey = await keystore.importPublicKey(entryKey)
-              return keystore.verify(sig, pubKey, data)
-            }
-          )
-          const acl = new ACL((pubKey, entry) => Promise.resolve(pubKey === key.getPublic('hex')))
-          const identity = new Identity(
-            key.getPublic('hex'),
-            key.getPublic('hex'),
-            provider
-          )
+          const testKeyPath = '../test/fixtures/keys'
+          const keystore = Keystore.create(testKeyPath)
+          const identitySignerFn = (key, data) => keystore.sign(key, data)
+          const access = new AccessController()
+          const identity = await IdentityProvider.createIdentity(keystore, 'userA', identitySignerFn)
 
-          log1 = new Log(ipfs, 'browser-benchmark-join-signed-A', null, null, null, acl, identity)
-          log2 = new Log(ipfs, 'browser-benchmark-join-signed-B', null, null, null, acl, identity)
+          log1 = new Log(ipfs, access, identity, 'browser-benchmark-join-signed-A')
+          log2 = new Log(ipfs, access, identity, 'browser-benchmark-join-signed-B')
           queryLoop()
         })
 

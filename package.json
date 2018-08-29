@@ -13,6 +13,7 @@
     "node": ">=8.0.0"
   },
   "dependencies": {
+    "orbit-db-identity-provider": "github:orbitdb/orbit-db-identity-provider",
     "p-map": "^1.1.1",
     "p-whilst": "^1.0.0"
   },
@@ -27,7 +28,7 @@
     "ipfs-repo": "~0.22.1",
     "istanbul": "^0.4.5",
     "mocha": "^5.2.0",
-    "orbit-db-keystore": "~0.1.0",
+    "orbit-db-keystore": "github:orbitdb/orbit-db-keystore#fix/verification",
     "rimraf": "^2.6.1",
     "uglifyjs-webpack-plugin": "~1.2.2",
     "webpack": "^3.10.0"

@@ -7,7 +7,7 @@ const DatastoreLevel = require('datastore-level')
 const config = require('./config/ipfs-daemon.config')
 const Log = require('../src/log.js')
 const MemStore = require('./utils/mem-store')
-const { defaultJoinPermissionCheckingFn, getTestACL, getTestIdentity } = require('./utils/test-entry-identity')
+const { AccessController, IdentityProvider, Keystore } = Log
 
 const apis = [require('ipfs')]
 
@@ -41,7 +41,15 @@ apis.forEach((IPFS) => {
   describe('ipfs-log - Replication', function() {
     this.timeout(40000)
 
-    let ipfs1, ipfs2, client1, client2, db1, db2, id1, id2
+    let ipfs1, ipfs2, client1, client2, db1, db2, id1, id2, testIdentity, testIdentity2
+
+    const testKeysPath = './test/fixtures/keys'
+    const keystore = Keystore.create(testKeysPath)
+    const identitySignerFn = async (id, data) => {
+      const key = await keystore.getKey(id)
+      return await keystore.sign(key, data)
+    }
+    const testACL = new AccessController()
 
     before(function (done) {
       rmrf.sync(config.daemon1.repo)
@@ -72,6 +80,10 @@ apis.forEach((IPFS) => {
                   // Connect the peers manually to speed up test times
                   await ipfs2.swarm.connect(ipfs1._peerInfo.multiaddrs._multiaddrs[0].toString())
                   await ipfs1.swarm.connect(ipfs2._peerInfo.multiaddrs._multiaddrs[0].toString())
+
+                  testIdentity = await IdentityProvider.createIdentity(keystore, 'userA', identitySignerFn)
+                  testIdentity2 = await IdentityProvider.createIdentity(keystore, 'userB', identitySignerFn)
+
                   done()
                 })
             })
@@ -95,10 +107,6 @@ apis.forEach((IPFS) => {
       let buffer2 = []
       let processing = 0
 
-      const permissionCheckingFn = defaultJoinPermissionCheckingFn(['peerA', 'peerB'])
-      const [idA, aclA] = [getTestIdentity('peerA'), getTestACL('peerA', permissionCheckingFn)]
-      const [idB, aclB] = [getTestIdentity('peerB'), getTestACL('peerB', permissionCheckingFn)]
-
       const handleMessage = async (message) => {
         if (id1 === message.from)
           return
@@ -107,7 +115,7 @@ apis.forEach((IPFS) => {
         const exclude = log1.values.map((e) => e.hash)
         process.stdout.write('\r')
         process.stdout.write(`> Buffer1: ${buffer1.length} - Buffer2: ${buffer2.length}`)
-        const log = await Log.fromMultihash(ipfs1, message.data.toString(), -1, null, aclA, idA)
+        const log = await Log.fromMultihash(ipfs1, testACL, testIdentity, message.data.toString(), -1)
         await log1.join(log)
         processing --
       }
@@ -120,16 +128,16 @@ apis.forEach((IPFS) => {
         process.stdout.write('\r')
         process.stdout.write(`> Buffer1: ${buffer1.length} - Buffer2: ${buffer2.length}`)
         const exclude = log2.values.map((e) => e.hash)
-        const log = await Log.fromMultihash(ipfs2, message.data.toString(), -1, null, aclB, idB)
+        const log = await Log.fromMultihash(ipfs2, testACL, testIdentity2, message.data.toString(), -1, null)
         await log2.join(log)
         processing --
       }
 
       beforeEach((done) => {
-        log1 = new Log(ipfs1, 'A', null, null, null, aclA, idA)
-        log2 = new Log(ipfs2, 'A', null, null, null, aclB, idB)
-        input1 = new Log(ipfs1, 'A', null, null, null, aclA, idA)
-        input2 = new Log(ipfs2, 'A', null, null, null, aclB, idB)
+        log1 = new Log(ipfs1, testACL, testIdentity, 'A')
+        log2 = new Log(ipfs2, testACL, testIdentity2, 'A')
+        input1 = new Log(ipfs1, testACL, testIdentity, 'A')
+        input2 = new Log(ipfs2, testACL, testIdentity2, 'A')
         ipfs1.pubsub.subscribe(channel, handleMessage, (err) => {
           if (err)
             return done(err)
@@ -175,7 +183,7 @@ apis.forEach((IPFS) => {
               const timeout = 30000
               await whileProcessingMessages(timeout)
 
-              let result = new Log(ipfs1, 'A', null, null, null, aclA, idA)
+              let result = new Log(ipfs1, testACL, testIdentity, 'A')
               await result.join(log1)
               await result.join(log2)
 

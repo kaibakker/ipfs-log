@@ -5,7 +5,8 @@ const rmrf = require('rimraf')
 const IPFSRepo = require('ipfs-repo')
 const DatastoreLevel = require('datastore-level')
 const Entry = require('../src/entry')
-const { getTestACL, getTestIdentity } = require('./utils/test-entry-identity')
+const { AccessController, IdentityProvider, Keystore } = require('../src/log')
+const startIpfs = require('./utils/start-ipfs')
 
 const apis = [require('ipfs')]
 const dataDir = './ipfs/tests/entry'
@@ -16,41 +17,51 @@ const repoConf = {
   },
 }
 
-const testACL = getTestACL('A')
-const testIdentity = getTestIdentity('A')
-let ipfs, ipfsDaemon
+const ipfsConf = {
+  repo: new IPFSRepo(dataDir, repoConf),
+  EXPERIMENTAL: {
+    pubsub: true,
+    dht: false,
+    sharding: false,
+  },
+}
 
-apis.forEach((IPFS) => {
+let ipfs, testIdentity
+
+apis.forEach((IPFS) =>  {
 
   describe('Entry', function() {
     this.timeout(20000)
 
-    before((done) => {
+    const testUserId = 'userA'
+    const testKeysPath = './test/fixtures/keys'
+    const keystore = Keystore.create(testKeysPath)
+    const identitySignerFn = async (id, data) => {
+      const key = await keystore.getKey(id)
+      return await keystore.sign(key, data)
+    }
+    const testACL = new AccessController()
+
+    before( async () => {
       rmrf.sync(dataDir)
-      ipfs = new IPFS({
-        repo: new IPFSRepo(dataDir, repoConf),
-        EXPERIMENTAL: {
-          pubsub: true,
-          dht: false,
-          sharding: false,
-        },
-      })
-      ipfs.on('error', done)
-      ipfs.on('ready', () => done())
+      testIdentity = await IdentityProvider.createIdentity(keystore, testUserId, identitySignerFn)
+      ipfs = await startIpfs(IPFS, ipfsConf)
     })
 
     after(async () => {
       if (ipfs)
         await ipfs.stop()
+
+      rmrf.sync(dataDir)
     })
 
     describe('create', () => {
       it('creates a an empty entry', async () => {
-        const expectedHash = 'QmatUBMvJfUM6vDKi4YaWw3Au3tPSxRSJJFTNaB1crWoQY'
-        const entry = await Entry.createAndPublish('A', 'hello', [], null, null, testIdentity, ipfs)
+        const expectedHash = 'QmVk4R4ePk7PHhpJ9g212iSzgXodw7bKGacMXLkxDavh9X'
+        const entry = await Entry.create(ipfs, testIdentity, 'A', 'hello')
         assert.equal(entry.hash, expectedHash)
         assert.equal(entry.id, 'A')
-        assert.equal(entry.clock.id, 'A')
+        assert.equal(entry.clock.id, testIdentity.publicKey)
         assert.equal(entry.clock.time, 0)
         assert.equal(entry.v, 0)
         assert.equal(entry.payload, 'hello')
@@ -58,12 +69,12 @@ apis.forEach((IPFS) => {
       })
 
       it('creates a entry with payload', async () => {
-        const expectedHash = 'QmRSnwdqveoo1wiJdTY6ZsMApSJ8NwPcuCwEVWQpEgeCF4'
+        const expectedHash = 'QmfMKCbcAdoT2UGfKxBTJE9TX7PJoHx4YvYZ6kBHeS3QFz'
         const payload = 'hello world'
-        const entry = await Entry.createAndPublish('A', payload, [], null, null, testIdentity, ipfs)
+        const entry = await Entry.create(ipfs, testIdentity, 'A', payload, [])
         assert.equal(entry.payload, payload)
         assert.equal(entry.id, 'A')
-        assert.equal(entry.clock.id, 'A')
+        assert.equal(entry.clock.id, testIdentity.publicKey)
         assert.equal(entry.clock.time, 0)
         assert.equal(entry.v, 0)
         assert.equal(entry.next.length, 0)
@@ -71,40 +82,40 @@ apis.forEach((IPFS) => {
       })
 
       it('creates a entry with payload and next', async () => {
-        const expectedHash = 'QmeUxYUKRm3PU8qCw9CEf7ysMxzsC9wr7yQaBjPf5iJyAq'
+        const expectedHash = 'QmfYg1oL42CrugMPhat3sCZ6DRwFLTuqzgFLqQy4fNgP1g'
         const payload1 = 'hello world'
         const payload2 = 'hello again'
-        const entry1 = await Entry.createAndPublish('A', payload1, [], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', payload1, [])
         entry1.clock.tick()
-        const entry2 = await Entry.createAndPublish('A', payload2, [entry1], entry1.clock, null, testIdentity, ipfs)
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', payload2, [entry1], entry1.clock)
         assert.equal(entry2.payload, payload2)
         assert.equal(entry2.next.length, 1)
         assert.equal(entry2.hash, expectedHash)
-        assert.equal(entry2.clock.id, 'A')
+        assert.equal(entry2.clock.id, testIdentity.publicKey)
         assert.equal(entry2.clock.time, 1)
       })
 
       it('`next` parameter can be an array of strings', async () => {
-        const entry1 = await Entry.createAndPublish('A', 'hello1', [], null, null, testIdentity, ipfs)
-        const entry2 = await Entry.createAndPublish('A', 'hello2', [entry1.hash], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', 'hello1', [])
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', 'hello2', [entry1.hash])
         assert.equal(typeof entry2.next[0] === 'string', true)
       })
 
       it('`next` parameter can be an array of Entry instances', async () => {
-        const entry1 = await Entry.createAndPublish('A', 'hello1', [], null, null, testIdentity, ipfs)
-        const entry2 = await Entry.createAndPublish('A', 'hello2', [entry1], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', 'hello1', [])
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', 'hello2', [entry1])
         assert.equal(typeof entry2.next[0] === 'string', true)
       })
 
       it('`next` parameter can contain nulls and undefined objects', async () => {
-        const entry1 = await Entry.createAndPublish('A', 'hello1', [], null, null, testIdentity, ipfs)
-        const entry2 = await Entry.createAndPublish('A', 'hello2', [entry1, null, undefined], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', 'hello1', [])
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', 'hello2', [entry1, null, undefined])
         assert.equal(typeof entry2.next[0] === 'string', true)
       })
 
       it('throws an error if ipfs is not defined', async () => {
         try {
-          const entry = await Entry.createAndPublish()
+          const entry = await Entry.create()
         } catch(e) {
           assert.equal(e.message, 'Ipfs instance not defined')
         }
@@ -112,7 +123,7 @@ apis.forEach((IPFS) => {
 
       it('throws an error if identity are not defined', async () => {
         try {
-          await Entry.createAndPublish('A', 'hello2', [], null, null, null, ipfs)
+          await Entry.create(ipfs, null, 'A', 'hello2', [])
         } catch(e) {
           assert.equal(e.message, 'Identity is required, cannot create entry')
         }
@@ -120,7 +131,7 @@ apis.forEach((IPFS) => {
 
       it('throws an error if id is not defined', async () => {
         try {
-          const entry = await Entry.createAndPublish(null, 'hello', [], null, null, testIdentity, ipfs)
+          const entry = await Entry.create(ipfs, testIdentity, null, 'hello', [])
         } catch(e) {
           assert.equal(e.message, 'Entry requires an id')
         }
@@ -128,7 +139,7 @@ apis.forEach((IPFS) => {
 
       it('throws an error if data is not defined', async () => {
         try {
-          const entry = await Entry.createAndPublish('A', null, [], null, null, testIdentity, ipfs)
+          const entry = await Entry.create(ipfs, testIdentity, 'A', null, [])
         } catch(e) {
           assert.equal(e.message, 'Entry requires data')
         }
@@ -136,7 +147,7 @@ apis.forEach((IPFS) => {
 
       it('throws an error if next is not an array', async () => {
         try {
-          const entry = await Entry.createAndPublish('A', 'hello', null, null, null, testIdentity, ipfs)
+          const entry = await Entry.create(ipfs, testIdentity, 'A', 'hello')
         } catch(e) {
           assert.equal(e.message, '\'next\' argument is not an array')
         }
@@ -145,8 +156,8 @@ apis.forEach((IPFS) => {
 
     describe('toMultihash', () => {
       it('returns an ipfs hash', async () => {
-        const expectedHash = 'QmatUBMvJfUM6vDKi4YaWw3Au3tPSxRSJJFTNaB1crWoQY'
-        const entry = await Entry.createAndPublish('A', 'hello', [], null, null, testIdentity, ipfs)
+        const expectedHash = 'QmVk4R4ePk7PHhpJ9g212iSzgXodw7bKGacMXLkxDavh9X'
+        const entry = await Entry.create(ipfs, testIdentity, 'A', 'hello', [])
         const hash = await Entry.toMultihash(ipfs, entry)
         assert.equal(entry.hash, expectedHash)
         assert.equal(hash, expectedHash)
@@ -168,7 +179,7 @@ apis.forEach((IPFS) => {
         }
 
         try {
-          const entry = await Entry.createAndPublish('A', 'hello', [], null, null, testIdentity, ipfs)
+          const entry = await Entry.create(ipfs, testIdentity, 'A', 'hello', [])
           delete entry.clock
           await Entry.toMultihash(ipfs, entry)
         } catch(e) {
@@ -179,11 +190,11 @@ apis.forEach((IPFS) => {
 
     describe('fromMultihash', () => {
       it('creates a entry from ipfs hash', async () => {
-        const expectedHash = 'QmVoyfFjgNXrPhAduxkHWopkHEUTRucJcaU53qAiBwog1s'
+        const expectedHash = 'Qmb6jCETr8ARcFHS28BFRXJrdyi1eJEpRenqKGDarrhkvT'
         const payload1 = 'hello world'
         const payload2 = 'hello again'
-        const entry1 = await Entry.createAndPublish('A', payload1, [], null, null, testIdentity, ipfs)
-        const entry2 = await Entry.createAndPublish('A', payload2, [entry1], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', payload1, [])
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', payload2, [entry1])
         const final = await Entry.fromMultihash(ipfs, entry2.hash)
         assert.equal(final.id, 'A')
         assert.equal(final.payload, payload2)
@@ -213,17 +224,17 @@ apis.forEach((IPFS) => {
       it('returns true if entry has a child', async () => {
         const payload1 = 'hello world'
         const payload2 = 'hello again'
-        const entry1 = await Entry.createAndPublish('A', payload1, [], null, null, testIdentity, ipfs)
-        const entry2 = await Entry.createAndPublish('A', payload2, [entry1], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', payload1, [])
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', payload2, [entry1])
         assert.equal(Entry.isParent(entry1, entry2), true)
       })
 
       it('returns false if entry does not have a child', async () => {
         const payload1 = 'hello world'
         const payload2 = 'hello again'
-        const entry1 = await Entry.createAndPublish('A', payload1, [], null, null, testIdentity, ipfs)
-        const entry2 = await Entry.createAndPublish('A', payload2, [], null, null, testIdentity, ipfs)
-        const entry3 = await Entry.createAndPublish('A', payload2, [entry2], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', payload1, [])
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', payload2, [])
+        const entry3 = await Entry.create(ipfs, testIdentity, 'A', payload2, [entry2])
         assert.equal(Entry.isParent(entry1, entry2), false)
         assert.equal(Entry.isParent(entry1, entry3), false)
         assert.equal(Entry.isParent(entry2, entry3), true)
@@ -233,23 +244,23 @@ apis.forEach((IPFS) => {
     describe('compare', () => {
       it('returns true if entries are the same', async () => {
         const payload1 = 'hello world'
-        const entry1 = await Entry.createAndPublish('A', payload1, [], null, null, testIdentity, ipfs)
-        const entry2 = await Entry.createAndPublish('A', payload1, [], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', payload1, [])
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', payload1, [])
         assert.equal(Entry.isEqual(entry1, entry2), true)
       })
 
       it('returns true if entries are not the same', async () => {
         const payload1 = 'hello world1'
         const payload2 = 'hello world2'
-        const entry1 = await Entry.createAndPublish('A', payload1, [], null, null, testIdentity, ipfs)
-        const entry2 = await Entry.createAndPublish('A', payload2, [], null, null, testIdentity, ipfs)
+        const entry1 = await Entry.create(ipfs, testIdentity, 'A', payload1, [])
+        const entry2 = await Entry.create(ipfs, testIdentity, 'A', payload2, [])
         assert.equal(Entry.isEqual(entry1, entry2), false)
       })
     })
 
     describe('isEntry', () => {
       it('is an Entry', async () => {
-        const entry = await Entry.createAndPublish('A', 'hello', [], null, null, testIdentity, ipfs)
+        const entry = await Entry.create(ipfs, testIdentity, 'A', 'hello', [])
         assert.equal(Entry.isEntry(entry), true)
       })
 

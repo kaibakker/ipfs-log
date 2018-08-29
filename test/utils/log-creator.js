@@ -2,22 +2,15 @@
 
 const Entry = require('../../src/entry')
 const Log = require('../../src/log.js')
-const { defaultJoinPermissionCheckingFn, getTestACL, getTestIdentity } = require('./test-entry-identity')
-
-const getTestEntryValidator = require('./test-entry-identity')
 
 class LogCreator {
-  static async createLog1 (ipfs) {
+  static async createLog1 (ipfs, access, identities) {
     const create = async () => {
-      const joinPermissionCheckingFn = defaultJoinPermissionCheckingFn(['A', 'B', '3', 'log'])
-      const [id1, acl1] = [getTestIdentity('A'), getTestACL('A', joinPermissionCheckingFn)]
-      const [id2, acl2] = [getTestIdentity('B'), getTestACL('B', joinPermissionCheckingFn)]
-      const [id3, acl3] = [getTestIdentity('3'), getTestACL('3', joinPermissionCheckingFn)]
-      const [id4, acl4] = [getTestIdentity('log'), getTestACL('log', joinPermissionCheckingFn)]
-      let logA = new Log(ipfs, 'X', null, null, null, acl1, id1)
-      let logB = new Log(ipfs, 'X', null, null, null, acl2, id2)
-      let log3 = new Log(ipfs, 'X', null, null, null, acl3, id3)
-      let log  = new Log(ipfs, 'X', null, null, null, acl4, id4)
+
+      let logA = new Log(ipfs, access, identities[0], 'X')
+      let logB = new Log(ipfs, access, identities[1],  'X')
+      let log3 = new Log(ipfs, access, identities[2],  'X')
+      let log  = new Log(ipfs, access, identities[3],  'X')
 
       for(let i = 1; i <= 5; i ++) {
         await logA.append('entryA' + i)
@@ -48,19 +41,16 @@ class LogCreator {
     return { log: log, expectedData: expectedData }
   }
 
-  static async createLog100_2 (ipfs) {
+  static async createLog100_2 (ipfs, access, identities) {
     const amount = 100
 
     let expectedData = []
 
     const create = async () => {
-      const joinPermissionCheckingFn = defaultJoinPermissionCheckingFn(['A', 'B', 'log'])
-      const [id1, acl1] = [getTestIdentity('A'), getTestACL('A', joinPermissionCheckingFn)]
-      const [id2, acl2] = [getTestIdentity('B'), getTestACL('B', joinPermissionCheckingFn)]
-      const [id3, acl3] = [getTestIdentity('log'), getTestACL('log', joinPermissionCheckingFn)]
-      let logA = new Log(ipfs, 'X', null, null, null, acl1, id1)
-      let logB = new Log(ipfs, 'X', null, null, null, acl2, id2)
-      let log3 = new Log(ipfs, 'X', null, null, null, acl3, id3)
+
+      let logA = new Log(ipfs, access, identities[0], 'X')
+      let logB = new Log(ipfs, access, identities[1], 'X')
+      let log3 = new Log(ipfs, access, identities[2], 'X')
       for(let i = 1; i <= amount; i ++) {
         await logA.append('entryA' + i)
         await logB.join(logA)

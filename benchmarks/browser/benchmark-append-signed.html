@@ -8,35 +8,24 @@
     <h2>Description</h2>
     <div>Add an entry to a log. Measure throughput in operations per second.</div>
     <pre><i>
-    const keystore = Keystore.create('./browser-benchmark-append-test-keys')
-    const key = keystore.createKey('browser-benchmark-append-signed')
-    const provider = new IdentityProvider(
-      data => keystore.sign(key, data),
-      async (sig, entryKey, data) =>  {
-        const pubKey = await keystore.importPublicKey(entryKey)
-        return keystore.verify(sig, pubKey, data)
-      }
-    )
-    const acl = new ACL((pubKey, entry) => Promise.resolve(pubKey === key.getPublic('hex')))
-    const identity = new Identity(
-      key.getPublic('hex'),
-      key.getPublic('hex'),
-      provider
-    )
+      const testKeyPath = '../test/fixtures/keys'
+      const keystore = Keystore.create(testKeyPath)
+      const identityProvider = new IdentityProvider(keystore)
+      const identitySignerFn = (key, data) => keystore.sign(key, data)
+      const access = new AccessController()
+      const identity = await IdentityProvider.createIdentity(keystore, 'userA', identitySignerFn)
 
-    log = new Log(ipfs, 'browser-benchmark-append-signed', null, null, null, acl, identity)
-    await log.append(loopCount)
+      log = new Log(ipfs, access, identity, 'browser-benchmark-append-signed')
+      await log.append(loopCount)
     </i></pre>
 
     <h2>Results</h2>
     <pre id="output"></pre>
 
-    <script type="text/javascript" src="keystore.min.js" charset="utf-8"></script>
     <script type="text/javascript" src="../../dist/ipfslog.min.js" charset="utf-8"></script>
     <script type="text/javascript" src="../../node_modules/ipfs/dist/index.min.js" charset="utf-8"></script>
 
     <script type="text/javascript">
-      // @FIXME Fix browser benchmarks before merging!
       let log, ipfs
 
       // Metrics
@@ -45,7 +34,7 @@
       let queriesPerSecond = 0
       let lastTenSeconds = 0
 
-      const { ACL, Identity, IdentityProvider } = Log
+      const { AccessController, IdentityProvider, Keystore } = Log
       const queryLoop = () => {
         return log.append(totalQueries.toString())
           .then((res) => {
@@ -70,7 +59,7 @@
 
         ipfs.on('error', (err) => console.error(err))
 
-        ipfs.on('ready', () => {
+        ipfs.on('ready', async () => {
           const outputElm = document.getElementById('output')
           // Output metrics at 1 second interval
           setInterval(() => {
@@ -86,23 +75,14 @@
             queriesPerSecond = 0
           }, 1000)
 
-          const keystore = Keystore.create('./browser-benchmark-append-test-keys')
-          const key = keystore.createKey('browser-benchmark-append-signed')
-          const provider = new IdentityProvider(
-            data => keystore.sign(key, data),
-            async (sig, entryKey, data) =>  {
-              const pubKey = await keystore.importPublicKey(entryKey)
-              return keystore.verify(sig, pubKey, data)
-            }
-          )
-          const acl = new ACL((pubKey, entry) => Promise.resolve(pubKey === key.getPublic('hex')))
-          const identity = new Identity(
-            key.getPublic('hex'),
-            key.getPublic('hex'),
-            provider
-          )
+          const testKeyPath = '../test/fixtures/keys'
+          const keystore = Keystore.create(testKeyPath)
+          const identityProvider = new IdentityProvider(keystore)
+          const identitySignerFn = (key, data) => keystore.sign(key, data)
+          const access = new AccessController()
+          const identity = await IdentityProvider.createIdentity(keystore, 'userA', identitySignerFn)
 
-          log = new Log(ipfs, 'browser-benchmark-append-signed', null, null, null, acl, identity)
+          log = new Log(ipfs, access, identity, 'browser-benchmark-append-signed')
           queryLoop()
         })
 

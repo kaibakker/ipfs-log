@@ -12,15 +12,15 @@ class Entry {
    * @param {string|Buffer|Object|Array} data - Data of the entry to be added. Can be any JSON.stringifyable data.
    * @param {Array<Entry|string>} [next=[]] Parents of the entry
    * @example
-   * const entry = await Entry.createAndPublish(ipfs, 'hello')
+   * const entry = await Entry.create(ipfs, identity, 'hello')
    * console.log(entry)
    * // { hash: null, payload: "hello", next: [] }
    * @returns {Promise<Entry>}
    */
-  static async createAndPublish (id, data, next = [], clock, nodeId, identity, ipfs) {
+  static async create(ipfs, identity, logId, data, next = [], clock) {
     if (!isDefined(ipfs)) throw IpfsNotDefinedError()
     if (!isDefined(identity)) throw new Error("Identity is required, cannot create entry")
-    if (!isDefined(id)) throw new Error('Entry requires an id')
+    if (!isDefined(logId)) throw new Error('Entry requires an id')
     if (!isDefined(data)) throw new Error('Entry requires data')
     if (!isDefined(next) || !Array.isArray(next)) throw new Error("'next' argument is not an array")
 
@@ -29,22 +29,18 @@ class Entry {
     let nexts = next.filter(isDefined)
       .map(toEntry)
 
-    // Take the id of the given clock by default,
-    // if clock not given, take the signing key if it's a Key instance,
-    // or if none given, take the id as the clock id
-    const clockId = clock ? clock.id : (nodeId ? nodeId : id)
-    const clockTime = clock ? clock.time : null
     const entry = {
       hash: null, // "Qm...Foo", we'll set the hash after persisting the entry
-      id: id, // For determining a unique chain
+      id: logId, // For determining a unique chain
       payload: data, // Can be any JSON.stringifyable data
       next: nexts, // Array of Multihashes
       v: 0, // For future data structure updates, should currently always be 0
-      clock: new Clock(clockId, clockTime),
+      clock: clock || new Clock(identity.publicKey),
     }
 
-    const signature = await identity.provider.sign(encode(entry))
+    const signature = await identity.provider.sign(identity, encode(entry))
     entry.key = identity.publicKey
+    entry.identity = identity.toJSON()
     entry.sig = signature
     entry.hash = await Entry.toMultihash(ipfs, entry)
     return entry
@@ -56,10 +52,10 @@ class Entry {
    * @return {Promise}      Returns a promise that resolves to a boolean value
    * indicating if the entry signature is valid
    */
-  static async verify (identity, entry) {
-    if (!identity) throw new Error("Identity is required, cannot verify entry")
+  static async verify (identityProvider, entry) {
+    if (!identityProvider) throw new Error("Identity-provider is required, cannot verify entry")
     if (!Entry.isEntry(entry)) throw new Error("Invalid Log entry")
-    if (!entry.key) throw new Error("Entry doesn't have a public key")
+    if (!entry.key) throw new Error("Entry doesn't have a key")
     if (!entry.sig) throw new Error("Entry doesn't have a signature")
 
     const e = Object.assign({}, {
@@ -71,7 +67,7 @@ class Entry {
       clock: entry.clock,
     })
 
-    return identity.provider.verify(entry.sig, entry.key, encode(e))
+    return identityProvider.verify(entry.sig, entry.key, encode(e))
   }
 
   /**
@@ -102,6 +98,7 @@ class Entry {
     }
 
     if (entry.sig) Object.assign(e, { sig: entry.sig })
+    if (entry.identity) Object.assign(e, { identity: entry.identity })
     if (entry.key) Object.assign(e, { key: entry.key })
 
     const data = Buffer.from(JSON.stringify(e))

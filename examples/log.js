@@ -2,8 +2,7 @@
 
 const IPFS = require('ipfs')
 const Log = require('../src/log')
-const { ACL, Identity, IdentityProvider } = Log
-const Keystore = require('orbit-db-keystore')
+const { AccessController, IdentityProvider, Keystore } = Log
 
 const dataPath = './ipfs/examples/log'
 
@@ -18,38 +17,24 @@ const ipfs = new IPFS({
 ipfs.on('error', (err) => console.error(err))
 ipfs.on('ready', async () => {
   const keystore = Keystore.create(dataPath + '/keystore')
+  const identitySignerFn = (key, data) => keystore.sign(key, data)
+  const access = new AccessController()
 
-  let key1, key2, key3
+  let identityA, identityB, identityC
+
   try {
-    key1 = keystore.getKey('A') || keystore.createKey('A')
-    key2 = keystore.getKey('C') || keystore.createKey('C')
+    identityA = await IdentityProvider.createIdentity(keystore, 'identityA', identitySignerFn)
+    identityB = await IdentityProvider.createIdentity(keystore, 'identityB', identitySignerFn)
+    identityC = await IdentityProvider.createIdentity(keystore, 'identityC', identitySignerFn)
   } catch (e) {
     console.error(e)
   }
 
 
-  const getProvider = key => new IdentityProvider(
-    data => keystore.sign(key, data),
-    async (sig, entryKey, data) =>  {
-      const pubKey = await keystore.importPublicKey(entryKey)
-      return keystore.verify(sig, pubKey, data)
-    }
-  )
-  const getIdentity = key => new Identity(
-    key.getPublic('hex'),
-    key.getPublic('hex'),
-    getProvider(key)
-  )
-  const acl = new ACL(
-    (pubKey, entry) => Promise.resolve(
-      pubKey === key1.getPublic('hex') || pubKey === key2.getPublic('hex')
-    )
-  )
-
   // Create access controllers: allow write for key1 and key2
-  let log1 = new Log(ipfs, 'A', null, null, null, acl, getIdentity(key1))
-  let log2 = new Log(ipfs, 'A', null, null, null, acl, getIdentity(key1))
-  let log3 = new Log(ipfs, 'A', null, null, null, acl, getIdentity(key2))
+  let log1 = new Log(ipfs, access, identityA, 'A')
+  let log2 = new Log(ipfs, access, identityB, 'A')
+  let log3 = new Log(ipfs, access, identityC, 'A')
 
   try {
     await log1.append('one')
